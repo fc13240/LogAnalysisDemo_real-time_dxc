@@ -1,0 +1,138 @@
+linux：
+linux如何看目录下，各个文件的大小
+du -h --max-depth=1
+
+spark（data）
+spark-shell --master spark://sparksl05.eng.platformlab.ibm.com:14574
+cd /opt/xcdong/spark-1.4.1-2/spark-1.4.1-bin-hadoop2.6/app_logs
+var numTasks = 100
+var f = sc.parallelize(1 to numTasks, numTasks).map { i => Thread.sleep(30); i }.count()
+
+kafka
+/opt/xcdong/zookeeper-3.4.6/bin/zkServer.sh start
+bin/kafka-server-start.sh config/server.properties &
+
+flume
+bin/flume-ng agent --conf conf --conf-file kafka_log.conf --name producer -Dflume.root.logger=INFO,console
+
+kafka接收message
+bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic test24 --from-beginning &
+
+spark（run demo）
+pyspark --master spark://sparksl05.eng.platformlab.ibm.com:42379 --jars /opt/xcdong/spark-1.4.1-bin-hadoop2.6/lib/spark-examples-1.4.1-hadoop2.6.0.jar
+
+开启bokeh服务
+bokeh serve --host 9.21.62.237:5006 --host localhost:5006
+http://9.21.62.237:5006/?bokeh-session-id=hehe
+
+demo
+from __future__ import print_function
+import os
+import sys
+import json
+import time
+import math 
+from pyspark import SparkContext
+from pyspark.streaming import StreamingContext
+from pyspark.streaming.kafka import KafkaUtils
+from pyspark.sql import SQLContext, Row
+from threading import Timer  
+from operator import concat
+from bokeh.plotting import figure, output_file, show
+import numpy as np
+from numpy import pi
+from bokeh.client import push_session
+from bokeh.driving import cosine
+from bokeh.plotting import figure, curdoc
+from time import *
+import random
+
+def getSqlContextInstance(sparkContext):
+    if ('sqlContextSingletonInstance' not in globals()):
+        globals()['sqlContextSingletonInstance'] = SQLContext(sparkContext)
+    return globals()['sqlContextSingletonInstance']
+
+def process(time, rdd):
+        global DATA
+        global MIN_SUBMIT_TIME
+        if (rdd.count() != 0):
+            print("--------------------------time is %s" % time)
+            try:
+                value = rdd.collect()
+                sqlContext = getSqlContextInstance(rdd.context)
+                for (table_name, table_set) in value:
+                    registerDBTable(table_name, table_set, sqlContext)
+                getInfo = sqlContext.sql("SELECT min(ts.TaskInfo.LaunchTime) FROM SparkListenerTaskStart as ts")
+                if MIN_SUBMIT_TIME > getInfo.collect()[0][0]:
+                    MIN_SUBMIT_TIME = getInfo.collect()[0][0]
+                getInfo = sqlContext.sql(" \
+                          SELECT te.TaskInfo.TaskID as taskId, te.TaskInfo.ExecutorID as executorId, \
+                          te.TaskInfo.Host as host, (te.TaskInfo.LaunchTime - %s) as startTime, \
+                          (te.TaskInfo.FinishTime - te.TaskInfo.LaunchTime) as duration FROM \
+                          SparkListenerTaskEnd as te \
+                          " % MIN_SUBMIT_TIME)
+                DATA = getInfo.collect()
+                print("------------------end")          
+            except:
+                pass
+
+def getEvent(item):
+  json_format = json.loads(item)
+  key = json_format['Event']
+  value = json.dumps(json_format).replace(' ', '')
+  return (key, value)
+
+def registerDBTable(table_name, table_set, sqlContext):
+  lineRdd = sc.parallelize(table_set)
+  sqlContext.jsonRDD(lineRdd).registerTempTable(table_name)
+  return
+
+def getFloor(startTime, finishTime):  
+    return (int(startTime), int(finishTime))
+
+ssc = StreamingContext(sc, 2)
+DATA = "111"
+DATA_OLD = ""
+MIN_SUBMIT_TIME = 2456300956266
+
+topic = "test24"
+zkQuorum = "localhost:2181"
+
+lines = KafkaUtils.createStream(ssc, zkQuorum, "spark-streaming-consumer", {topic: 1}).map(lambda x: x[1])
+events = lines.map(lambda line: getEvent(line)).groupByKey()
+events.foreachRDD(process)
+
+ssc.start()
+
+p = figure(title="statistics of cluster", x_axis_label='startTime', y_axis_label='duration')
+r = p.scatter(x=[], y=[], color="navy", size=1)
+ds = r.data_source
+
+# open a session to keep our local document in sync with server
+session = push_session(curdoc(), "hehe")
+print(session.id)
+
+@cosine(w=0.03)
+def update(step):
+    global DATA
+    global DATA_OLD
+    if DATA != DATA_OLD and DATA != "111": 
+        try:
+            print("hehe")
+            x = [d[3] for d in DATA]
+            y = [d[4] for d in DATA]
+            ds.data["x"].extend(x)
+            ds.data["y"].extend(y)
+            ds.trigger('data', ds.data, ds.data)
+            DATA_OLD = DATA
+        except:
+            pass
+
+curdoc().add_periodic_callback(update, 100)
+
+session.show()
+
+session.loop_until_closed()
+
+ssc.awaitTermination()
+ssc.stop(stopSparkContext = False)
