@@ -8,5 +8,5 @@
     Flume_kafka_dxc.ppt                是flume和kafka的培训ppt(讲解他们的原理，使用等等)
     SparkStreaming_dxc .ppt            是sparkstreaming的培训PPT(讲解sparkstreaming的原理，使用等等)
     app-20151111041944-0762-f26ff739   是demo使用到的日志数据
-    demo_程序.txt                		 是相关的demo程序和指令
+    demo_程序.txt                		  是相关的demo程序和指令
     日志分析配套文档.md                  是整个说明文档
